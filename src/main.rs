@@ -81,6 +81,24 @@ enum LibrarySearchCriteria {
     ISBN,
 }
 
+impl LibrarySearchCriteria {
+    fn matches<'a, T>(&self, book: &'a Book, value: T) -> bool
+    where
+        T: AsRef<str>,
+    {
+        match self {
+            LibrarySearchCriteria::Author => book
+                .author
+                .to_lowercase()
+                .contains(&value.as_ref().to_lowercase()),
+            LibrarySearchCriteria::Title => book
+                .title
+                .to_lowercase()
+                .contains(&value.as_ref().to_lowercase()),
+            LibrarySearchCriteria::ISBN => book.isbn.eq(&value.as_ref()),
+        }
+    }
+}
 struct Library {
     books: Vec<Book>,
 }
@@ -102,29 +120,11 @@ impl Library {
         println!("======");
     }
 
-    fn search_by<T>(&self, criteria: LibrarySearchCriteria, value: T) -> Option<&Book>
+    fn search_by<T>(&mut self, criteria: LibrarySearchCriteria, value: T) -> Option<&mut Book>
     where
         T: AsRef<str>,
     {
-        return self.books.iter().find(|x| match criteria {
-            LibrarySearchCriteria::Author => x
-                .author
-                .to_lowercase()
-                .contains(&value.as_ref().to_lowercase()),
-            LibrarySearchCriteria::Title => x
-                .title
-                .to_lowercase()
-                .contains(&value.as_ref().to_lowercase()),
-            LibrarySearchCriteria::ISBN => x.isbn.eq(&value.as_ref()),
-        });
-    }
-
-    fn check_out(&mut self, isbn: &str) -> Result<(), &str> {
-        let book = self.books.iter_mut().find(|x| x.isbn.eq(isbn));
-        match book {
-            None => Err("Not found"),
-            Some(b) => b.check_out(),
-        }
+        return self.books.iter_mut().find(|x| criteria.matches(x, &value));
     }
 }
 
@@ -159,46 +159,41 @@ fn read(stdin: &Stdin) -> String {
         .lock()
         .lines()
         .next()
-        .expect("Failed to read")
+        .unwrap()
         .expect("Failed to read input");
 }
 fn main() {
     let mut library: Library = initialize();
     let stdin = io::stdin();
     println!("Welcome to Jose's library!");
-    
+
     loop {
         println!("Enter a title to search for: ");
         let title = read(&stdin);
 
-        let book = library.search_by(LibrarySearchCriteria::Title, &title);
+        if let Some(book) = library.search_by(LibrarySearchCriteria::Title, &title) {
+            println!("Here it is:");
+            book.print();
 
-        match book {
-            None => {
-                println!("Nothing found!");
-                return;
+            println!("Would you like to check out this book? (yes/no)");
+            let answer = read(&stdin);
+            match answer.to_lowercase().as_str() {
+                "yes" | "y" => match book.check_out() {
+                    Ok(_) => println!("Book checked out!"),
+                    Err(e) => println!("{}", e),
+                },
+                _ => {}
             }
-            Some(b) => {
-                println!("Here it is!");
-                b.print();
-            }
-        }
-
-        println!("Would you like to check out this book? (yes/no)");
-        let answer = read(&stdin);
-        match answer.to_lowercase().as_str() {
-            "yes" | "y" => match library.check_out(&book.unwrap().isbn.to_string()) {
-                Ok(_) => println!("Book checked out! (press Enter)..."),
-                Err(e) => println!("{}", e),
-            },
-            _ => {}
+        } else {
+            println!("Nothing found!");
         }
 
         println!("Would you like to search for another book? (yes/no)");
         let answer = read(&stdin);
-        match answer.to_lowercase().as_str() {
-            "yes" | "y" => continue,
-            _ => break,
+        if answer.to_lowercase().as_str() != "yes" && answer.to_lowercase().as_str() != "y" {
+            break;
         }
     }
+
+    println!("Goodbye!");
 }
