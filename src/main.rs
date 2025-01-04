@@ -1,5 +1,5 @@
 use std::fmt;
-use std::io::{self, BufRead};
+use std::io::{self, BufRead, Stdin};
 
 enum Genre {
     Fiction,
@@ -64,11 +64,21 @@ impl Book {
         println!("Published in {}", self.publication_year);
         println!("({})", self.status);
     }
+
+    fn check_out(&mut self) -> Result<(), &str> {
+        match self.status {
+            Status::Available => {}
+            _ => return Err("Book is not available!"),
+        }
+        self.status = Status::CheckedOut;
+        return Ok(());
+    }
 }
 
 enum LibrarySearchCriteria {
     Author,
     Title,
+    ISBN,
 }
 
 struct Library {
@@ -105,7 +115,16 @@ impl Library {
                 .title
                 .to_lowercase()
                 .contains(&value.as_ref().to_lowercase()),
+            LibrarySearchCriteria::ISBN => x.isbn.eq(&value.as_ref()),
         });
+    }
+
+    fn check_out(&mut self, isbn: &str) -> Result<(), &str> {
+        let book = self.books.iter_mut().find(|x| x.isbn.eq(isbn));
+        match book {
+            None => Err("Not found"),
+            Some(b) => b.check_out(),
+        }
     }
 }
 
@@ -135,22 +154,51 @@ fn initialize() -> Library {
     return library;
 }
 
+fn read(stdin: &Stdin) -> String {
+    return stdin
+        .lock()
+        .lines()
+        .next()
+        .expect("Failed to read")
+        .expect("Failed to read input");
+}
 fn main() {
-    let library: Library = initialize();
-    library.print();
+    let mut library: Library = initialize();
     let stdin = io::stdin();
     println!("Welcome to Jose's library!");
-    println!("Enter a title to search for: ");
+    
+    loop {
+        println!("Enter a title to search for: ");
+        let title = read(&stdin);
 
-    let input = stdin.lock().lines().next().expect("Failed to read");
+        let book = library.search_by(LibrarySearchCriteria::Title, &title);
 
-    let title = input.expect("Failed to read input");
+        match book {
+            None => {
+                println!("Nothing found!");
+                return;
+            }
+            Some(b) => {
+                println!("Here it is!");
+                b.print();
+            }
+        }
 
-    match library.search_by(LibrarySearchCriteria::Title, &title) {
-        None => println!("Nothing found!"),
-        Some(b) => {
-            println!("Here it is!");
-            b.print()
+        println!("Would you like to check out this book? (yes/no)");
+        let answer = read(&stdin);
+        match answer.to_lowercase().as_str() {
+            "yes" | "y" => match library.check_out(&book.unwrap().isbn.to_string()) {
+                Ok(_) => println!("Book checked out! (press Enter)..."),
+                Err(e) => println!("{}", e),
+            },
+            _ => {}
+        }
+
+        println!("Would you like to search for another book? (yes/no)");
+        let answer = read(&stdin);
+        match answer.to_lowercase().as_str() {
+            "yes" | "y" => continue,
+            _ => break,
         }
     }
 }
