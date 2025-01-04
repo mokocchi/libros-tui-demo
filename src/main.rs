@@ -1,6 +1,11 @@
 use std::fmt;
+use std::fs::{read_to_string, File};
 use std::io::{self, BufRead, Stdin};
+use std::path::Path;
 
+use serde::{Deserialize, Serialize};
+
+#[derive(Serialize, Deserialize)]
 enum Genre {
     Fiction,
     NonFiction,
@@ -19,6 +24,7 @@ impl fmt::Display for Genre {
     }
 }
 
+#[derive(Serialize, Deserialize)]
 enum Status {
     Available,
     CheckedOut,
@@ -35,6 +41,7 @@ impl fmt::Display for Status {
     }
 }
 
+#[derive(Serialize, Deserialize)]
 struct Book {
     title: String,
     author: String,
@@ -99,13 +106,19 @@ impl LibrarySearchCriteria {
         }
     }
 }
+
+#[derive(Serialize, Deserialize)]
 struct Library {
     books: Vec<Book>,
+    owner: String,
 }
 
 impl Library {
-    fn new() -> Library {
-        Library { books: Vec::new() }
+    fn new(owner: &str) -> Library {
+        Library {
+            books: Vec::new(),
+            owner: String::from(owner),
+        }
     }
 
     fn add(&mut self, book: Book) {
@@ -126,10 +139,27 @@ impl Library {
     {
         return self.books.iter_mut().find(|x| criteria.matches(x, &value));
     }
+
+    fn save(&self, path: &str) -> Result<(), io::Error> {
+        let json = serde_json::to_string(&self).unwrap();
+        return std::fs::write(path, json);
+    }
+
+    fn from_file(pathname: &str) -> Option<Library> {
+        let path = Path::new(pathname);
+        if path.exists() && path.is_file() {
+            let s = read_to_string(path).unwrap();
+            let library: Library = serde_json::from_str(&s).unwrap();
+            return Some(library);
+        } else {
+            File::create(pathname).unwrap();
+            return None;
+        }
+    }
 }
 
-fn initialize() -> Library {
-    let mut library: Library = Library::new();
+fn initialize_demo(owner: &str) -> Library {
+    let mut library: Library = Library::new(owner);
     library.add(Book::new(
         "The Great Gatsby",
         "F. Scott Fitzgerald",
@@ -154,6 +184,18 @@ fn initialize() -> Library {
     return library;
 }
 
+struct Config {
+    library_path: String,
+}
+
+impl Config {
+    fn new(library_path: &str) -> Config {
+        Config {
+            library_path: String::from(library_path),
+        }
+    }
+}
+
 fn read(stdin: &Stdin) -> String {
     return stdin
         .lock()
@@ -162,14 +204,36 @@ fn read(stdin: &Stdin) -> String {
         .unwrap()
         .expect("Failed to read input");
 }
+
 fn main() {
-    let mut library: Library = initialize();
     let stdin = io::stdin();
-    println!("Welcome to Jose's library!");
+    let config = Config::new("library.json");
+
+    println!("Welcome to LMA, the library management app");
+    println!("Loading library...");
+    let lib = Library::from_file(&config.library_path);
+    let mut library = match lib {
+        Some(l) => l,
+        None => {
+            println!("Library file not found. Creating a new one...");
+            println!("Who is the owner of this library?");
+            let owner = read(&io::stdin());
+            let l = initialize_demo(&owner);
+            l.save(&config.library_path).expect("Couldn't create library");
+            l
+        }
+    };
+
+    println!("Welcome to {}'s library!", library.owner);
 
     loop {
         println!("Enter a title to search for: ");
         let title = read(&stdin);
+
+        if title.is_empty() {
+            println!("Title cannot be empty!");
+            continue;
+        }
 
         if let Some(book) = library.search_by(LibrarySearchCriteria::Title, &title) {
             println!("Here it is:");
@@ -179,7 +243,10 @@ fn main() {
             let answer = read(&stdin);
             match answer.to_lowercase().as_str() {
                 "yes" | "y" => match book.check_out() {
-                    Ok(_) => println!("Book checked out!"),
+                    Ok(_) => {
+                        println!("Book checked out!");
+                        library.save(&config.library_path).expect("Couldn't save library");
+                    },
                     Err(e) => println!("{}", e),
                 },
                 _ => {}
@@ -195,5 +262,7 @@ fn main() {
         }
     }
 
+    println!("Saving library...");
+    library.save(&config.library_path).expect("Couldn't save library");
     println!("Goodbye!");
 }
