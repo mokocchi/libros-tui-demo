@@ -2,7 +2,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Style},
     text::{Line, Span, Text},
-    widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap},
+    widgets::{Block, Borders, Clear, List, ListItem, Padding, Paragraph, Wrap},
     Frame,
 };
 
@@ -27,20 +27,20 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
         .split(popup_layout[1])[1]
 }
 
-fn popup_screen(frame: &mut Frame, title: &str, message: &str) {
-    frame.render_widget(Clear, frame.area()); //this clears the entire screen and anything already drawn
+fn popup_screen(frame: &mut Frame, title: &str, message: &str, borders: Borders) {
+    frame.render_widget(Clear, frame.area());
     let popup_block = Block::default()
         .title(title)
-        .borders(Borders::NONE)
-        .style(Style::default().bg(Color::DarkGray));
+        .title_alignment(ratatui::layout::Alignment::Center)
+        .borders(borders)
+        .padding(Padding::new(0, 0, 1, 1))
+        .style(Style::default());
 
-    let exit_text = Text::styled(message, Style::default().fg(Color::Yellow));
-    let exit_paragraph = Paragraph::new(exit_text)
-        .block(popup_block)
-        .wrap(Wrap { trim: false });
+    let text = Text::styled(message, Style::default());
+    let paragraph = Paragraph::new(text).block(popup_block).centered();
 
     let area = centered_rect(60, 25, frame.area());
-    frame.render_widget(exit_paragraph, area);
+    frame.render_widget(paragraph, area);
 }
 
 fn loading_screen(frame: &mut Frame) {
@@ -48,6 +48,7 @@ fn loading_screen(frame: &mut Frame) {
         frame,
         "Loading library, press Enter and wait...",
         "You can cancel by pressing ESC",
+        Borders::ALL,
     );
 }
 
@@ -56,7 +57,7 @@ fn new_owner_screen(frame: &mut Frame, app: &App) {
         "Enter the owner of the library: {}",
         app.owner_input.clone()
     );
-    popup_screen(frame, "New Library", &owner_text);
+    popup_screen(frame, "New Library", &owner_text, Borders::ALL);
 }
 
 fn checked_out_result_screen(frame: &mut Frame, app: &App) {
@@ -65,7 +66,7 @@ fn checked_out_result_screen(frame: &mut Frame, app: &App) {
         Some(Ok(_)) => "Success",
         None => "Nothing happened",
     };
-    popup_screen(frame, "Checkout Result", result_text);
+    popup_screen(frame, "Checkout Result", result_text, Borders::ALL);
 }
 
 fn exiting_screen(frame: &mut Frame) {
@@ -73,6 +74,7 @@ fn exiting_screen(frame: &mut Frame) {
         frame,
         "Exiting Library Management Tool",
         "Are you sure you want to exit? (y/n)",
+        Borders::ALL,
     );
 }
 
@@ -96,11 +98,10 @@ fn main_screen_content(frame: &mut Frame, app: &App, area: Rect) {
     for book in books.iter() {
         let item = ListItem::new(Line::from(Span::styled(
             format!("{: <25} - {: <50}", book.get_author(), book.get_title()),
-            Style::default()
-                .fg(match book.get_available() {
-                    true => Color::Green,
-                    false => Color::Red,
-                }),
+            Style::default().fg(match book.get_available() {
+                true => Color::Green,
+                false => Color::Red,
+            }),
         )));
 
         list_items.push(item);
@@ -108,6 +109,33 @@ fn main_screen_content(frame: &mut Frame, app: &App, area: Rect) {
 
     let list = List::new(list_items);
     frame.render_widget(list, area);
+}
+
+fn checking_out_screen_content(frame: &mut Frame, app: &App, area: Rect) {
+    let book = app.selected_book.as_ref().unwrap();
+    let book_info = vec![
+        Line::from(Span::styled(
+            format!("Title: {}", book.get_title()),
+            Style::default().fg(Color::White),
+        )),
+        Line::from(Span::styled(
+            format!("Author: {}", book.get_author()),
+            Style::default().fg(Color::White),
+        )),
+        Line::from(Span::styled(
+            format!("ISBN: {}", book.get_isbn()),
+            Style::default().fg(Color::White),
+        )),
+    ];
+
+    let book_info_paragraph = Paragraph::new(book_info)
+        .block(Block::default().borders(Borders::ALL))
+        .wrap(Wrap { trim: false })
+        .centered();
+
+    let new_area = centered_rect(60, 25, area);
+
+    frame.render_widget(book_info_paragraph, new_area);
 }
 
 fn main_screen_mode_footer(frame: &mut Frame, app: &App, area: Rect) {
@@ -211,7 +239,10 @@ fn main_screen(frame: &mut Frame, app: &App) {
 
     main_screen_title_bar(frame, app, chunks[0]);
 
-    main_screen_content(frame, app, chunks[1]);
+    match app.current_screen {
+        CurrentScreen::CheckingOut => checking_out_screen_content(frame, app, chunks[1]),
+        _ => main_screen_content(frame, app, chunks[1]),
+    }
 
     let footer_chunks = Layout::default()
         .direction(Direction::Vertical)
