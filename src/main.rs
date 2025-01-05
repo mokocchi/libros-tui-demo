@@ -1,268 +1,157 @@
-use std::fmt;
-use std::fs::{read_to_string, File};
-use std::io::{self, BufRead, Stdin};
-use std::path::Path;
+mod app;
+mod ui;
+mod library;
 
-use serde::{Deserialize, Serialize};
+use app::{App, CurrentScreen};
+use crossterm::event::{self, DisableMouseCapture, Event, KeyCode};
+use crossterm::terminal::{disable_raw_mode, LeaveAlternateScreen};
+use library::LibrarySearchCriteria;
+use ratatui::crossterm::event::EnableMouseCapture;
+use ratatui::crossterm::execute;
+use ratatui::crossterm::terminal::{enable_raw_mode, EnterAlternateScreen};
+use ratatui::prelude::{Backend, CrosstermBackend};
+use ratatui::Terminal;
+use ui::ui;
+use std::error::Error;
+use std::io;
 
-#[derive(Serialize, Deserialize)]
-enum Genre {
-    Fiction,
-    NonFiction,
-    ScienceFiction,
-    Mystery,
-}
-
-impl fmt::Display for Genre {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Genre::Fiction => write!(f, "Fiction"),
-            Genre::NonFiction => write!(f, "Non-Fiction"),
-            Genre::ScienceFiction => write!(f, "Science Fiction"),
-            Genre::Mystery => write!(f, "Mystery"),
-        }
-    }
-}
-
-#[derive(Serialize, Deserialize)]
-enum Status {
-    Available,
-    CheckedOut,
-    Lost,
-}
-
-impl fmt::Display for Status {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Status::Available => write!(f, "Available"),
-            Status::CheckedOut => write!(f, "Checked Out"),
-            Status::Lost => write!(f, "Lost"),
-        }
-    }
-}
-
-#[derive(Serialize, Deserialize)]
-struct Book {
-    title: String,
-    author: String,
-    isbn: String,
-    publication_year: u16,
-    genre: Genre,
-    status: Status,
-}
-
-impl Book {
-    fn new(title: &str, author: &str, isbn: &str, publication_year: u16, genre: Genre) -> Book {
-        Book {
-            title: String::from(title),
-            author: String::from(author),
-            isbn: String::from(isbn),
-            publication_year,
-            genre,
-            status: Status::Available,
-        }
-    }
-
-    fn print(&self) {
-        println!("Title: {}", self.title);
-        println!("Author: {}", self.author);
-        println!("ISBN: {}", self.isbn);
-        println!("Genre: {}", self.genre);
-        println!("Published in {}", self.publication_year);
-        println!("({})", self.status);
-    }
-
-    fn check_out(&mut self) -> Result<(), &str> {
-        match self.status {
-            Status::Available => {}
-            _ => return Err("Book is not available!"),
-        }
-        self.status = Status::CheckedOut;
-        return Ok(());
-    }
-}
-
-enum LibrarySearchCriteria {
-    Author,
-    Title,
-    ISBN,
-}
-
-impl LibrarySearchCriteria {
-    fn matches<'a, T>(&self, book: &'a Book, value: T) -> bool
-    where
-        T: AsRef<str>,
-    {
-        match self {
-            LibrarySearchCriteria::Author => book
-                .author
-                .to_lowercase()
-                .contains(&value.as_ref().to_lowercase()),
-            LibrarySearchCriteria::Title => book
-                .title
-                .to_lowercase()
-                .contains(&value.as_ref().to_lowercase()),
-            LibrarySearchCriteria::ISBN => book.isbn.eq(&value.as_ref()),
-        }
-    }
-}
-
-#[derive(Serialize, Deserialize)]
-struct Library {
-    books: Vec<Book>,
-    owner: String,
-}
-
-impl Library {
-    fn new(owner: &str) -> Library {
-        Library {
-            books: Vec::new(),
-            owner: String::from(owner),
-        }
-    }
-
-    fn add(&mut self, book: Book) {
-        self.books.push(book);
-    }
-
-    fn print(&self) {
-        for book in &self.books {
-            println!("======");
-            book.print();
-        }
-        println!("======");
-    }
-
-    fn search_by<T>(&mut self, criteria: LibrarySearchCriteria, value: T) -> Option<&mut Book>
-    where
-        T: AsRef<str>,
-    {
-        return self.books.iter_mut().find(|x| criteria.matches(x, &value));
-    }
-
-    fn save(&self, path: &str) -> Result<(), io::Error> {
-        let json = serde_json::to_string(&self).unwrap();
-        return std::fs::write(path, json);
-    }
-
-    fn from_file(pathname: &str) -> Option<Library> {
-        let path = Path::new(pathname);
-        if path.exists() && path.is_file() {
-            let s = read_to_string(path).unwrap();
-            let library: Library = serde_json::from_str(&s).unwrap();
-            return Some(library);
-        } else {
-            File::create(pathname).unwrap();
-            return None;
-        }
-    }
-}
-
-fn initialize_demo(owner: &str) -> Library {
-    let mut library: Library = Library::new(owner);
-    library.add(Book::new(
-        "The Great Gatsby",
-        "F. Scott Fitzgerald",
-        "9780743273565",
-        1925,
-        Genre::Fiction,
-    ));
-    library.add(Book::new(
-        "To Kill a Mockingbird",
-        "Harper Lee",
-        "9780061120084",
-        1960,
-        Genre::Fiction,
-    ));
-    library.add(Book::new(
-        "1984",
-        "George Orwell",
-        "9780451524935",
-        1949,
-        Genre::ScienceFiction,
-    ));
-    return library;
-}
-
-struct Config {
-    library_path: String,
-}
-
-impl Config {
-    fn new(library_path: &str) -> Config {
-        Config {
-            library_path: String::from(library_path),
-        }
-    }
-}
-
-fn read(stdin: &Stdin) -> String {
-    return stdin
-        .lock()
-        .lines()
-        .next()
-        .unwrap()
-        .expect("Failed to read input");
-}
-
-fn main() {
-    let stdin = io::stdin();
-    let config = Config::new("library.json");
-
-    println!("Welcome to LMA, the library management app");
-    println!("Loading library...");
-    let lib = Library::from_file(&config.library_path);
-    let mut library = match lib {
-        Some(l) => l,
-        None => {
-            println!("Library file not found. Creating a new one...");
-            println!("Who is the owner of this library?");
-            let owner = read(&io::stdin());
-            let l = initialize_demo(&owner);
-            l.save(&config.library_path).expect("Couldn't create library");
-            l
-        }
-    };
-
-    println!("Welcome to {}'s library!", library.owner);
-
+fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Result<(), io::Error> {
     loop {
-        println!("Enter a title to search for: ");
-        let title = read(&stdin);
+        terminal.draw(|f| ui(f, app))?;
 
-        if title.is_empty() {
-            println!("Title cannot be empty!");
-            continue;
-        }
-
-        if let Some(book) = library.search_by(LibrarySearchCriteria::Title, &title) {
-            println!("Here it is:");
-            book.print();
-
-            println!("Would you like to check out this book? (yes/no)");
-            let answer = read(&stdin);
-            match answer.to_lowercase().as_str() {
-                "yes" | "y" => match book.check_out() {
-                    Ok(_) => {
-                        println!("Book checked out!");
-                        library.save(&config.library_path).expect("Couldn't save library");
-                    },
-                    Err(e) => println!("{}", e),
-                },
-                _ => {}
+        if let Event::Key(key) = event::read()? {
+            if key.kind == event::KeyEventKind::Release {
+                continue;
             }
-        } else {
-            println!("Nothing found!");
-        }
-
-        println!("Would you like to search for another book? (yes/no)");
-        let answer = read(&stdin);
-        if answer.to_lowercase().as_str() != "yes" && answer.to_lowercase().as_str() != "y" {
-            break;
+            match app.current_screen {
+                CurrentScreen::Loading => match key.code {
+                    KeyCode::Esc => {
+                        return Ok(());
+                    }
+                    KeyCode::Enter => {
+                        app.load();
+                        if app.loaded {
+                            app.current_screen = CurrentScreen::Home;
+                        } else {
+                            app.current_screen = CurrentScreen::NewOwner;
+                        }
+                    }
+                    _ => {}
+                },
+                CurrentScreen::NewOwner => match key.code {
+                    KeyCode::Char(value) => {
+                        app.owner_input.push(value);
+                    }
+                    KeyCode::Enter => {
+                        app.initialize_demo();
+                        app.current_screen = CurrentScreen::Home;
+                    }
+                    KeyCode::Backspace => {
+                        app.owner_input.pop();
+                    }
+                    _ => {}
+                },
+                CurrentScreen::Home => match key.code {
+                    KeyCode::Char('q') => {
+                        app.current_screen = CurrentScreen::Exiting;
+                    }
+                    KeyCode::Char('s') => {
+                        app.current_screen = CurrentScreen::Searching;
+                        app.term_input_mode = true;
+                        app.searching_input.clear();
+                    }
+                    _ => {}
+                },
+                CurrentScreen::Searching => match key.code {
+                    KeyCode::Tab => {
+                        app.term_input_mode = !app.term_input_mode;
+                    }
+                    KeyCode::Char(value) => {
+                        if app.term_input_mode {
+                            app.searching_input.push(value);
+                        } else {
+                            match value {
+                                't' => app.searching_criteria = LibrarySearchCriteria::Title,
+                                'a' => app.searching_criteria = LibrarySearchCriteria::Author,
+                                'i' => app.searching_criteria = LibrarySearchCriteria::ISBN,
+                                'q' => app.current_screen = CurrentScreen::Exiting,
+                                _ => {}
+                            }
+                        }
+                    }
+                    KeyCode::Backspace => {
+                        app.searching_input.pop();
+                    }
+                    KeyCode::Enter => {
+                        app.apply_search();
+                        if app.selected_book.is_some() {
+                            app.current_screen = CurrentScreen::CheckingOut;
+                        }
+                    }
+                    _ => {}
+                },
+                CurrentScreen::CheckingOut => match key.code {
+                    KeyCode::Enter => {
+                        app.check_out();
+                        if app.checkout_success.is_none() {
+                            app.error_message = Some("Book not found".to_string());
+                        }
+                        app.current_screen = CurrentScreen::CheckedOutResult;
+                    }
+                    KeyCode::Char('q') => {
+                        app.current_screen = CurrentScreen::Exiting;
+                    },
+                    KeyCode::Char('b') => {
+                        app.current_screen = CurrentScreen::Home;
+                    },
+                    _ => {}
+                },
+                CurrentScreen::CheckedOutResult => match key.code {
+                    KeyCode::Enter => {
+                        app.current_screen = CurrentScreen::Home;
+                    }
+                    _ => {}
+                },
+                CurrentScreen::Exiting => match key.code {
+                    KeyCode::Char('y') => {
+                        return Ok(());
+                    }
+                    KeyCode::Char('n') => {
+                        app.current_screen = CurrentScreen::Home;
+                    }
+                    _ => {}
+                },
+            }
         }
     }
+}
 
-    println!("Saving library...");
-    library.save(&config.library_path).expect("Couldn't save library");
-    println!("Goodbye!");
+fn main() -> Result<(), Box<dyn Error>> {
+    enable_raw_mode()?;
+    let mut stderr = io::stderr(); // This is a special case. Normally using stdout is fine
+    execute!(stderr, EnterAlternateScreen, EnableMouseCapture)?;
+
+    let backend = CrosstermBackend::new(stderr);
+    let mut terminal = Terminal::new(backend)?;
+
+    // create app and run it
+    let mut app = App::new();
+    let res = run_app(&mut terminal, &mut app);
+
+    disable_raw_mode()?;
+    execute!(
+        terminal.backend_mut(),
+        LeaveAlternateScreen,
+        DisableMouseCapture
+    )?;
+    terminal.show_cursor()?;
+
+    if let Ok(_) = res {
+        app.library.unwrap().save(&app.config.library_path)?;
+    } else
+    if let Err(err) = res {
+        println!("{err:?}");
+    }
+
+    Ok(())
 }
