@@ -1,6 +1,6 @@
 mod app;
-mod ui;
 mod library;
+mod ui;
 
 use app::{App, CurrentScreen};
 use crossterm::event::{self, DisableMouseCapture, Event, KeyCode};
@@ -11,11 +11,11 @@ use ratatui::crossterm::execute;
 use ratatui::crossterm::terminal::{enable_raw_mode, EnterAlternateScreen};
 use ratatui::prelude::{Backend, CrosstermBackend};
 use ratatui::Terminal;
-use ui::ui;
 use std::error::Error;
 use std::io;
+use ui::ui;
 
-fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Result<(), io::Error> {
+fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Result<bool, io::Error> {
     loop {
         terminal.draw(|f| ui(f, app))?;
 
@@ -26,7 +26,7 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Result<(), 
             match app.current_screen {
                 CurrentScreen::Loading => match key.code {
                     KeyCode::Esc => {
-                        return Ok(());
+                        return Ok(false);
                     }
                     KeyCode::Enter => {
                         app.load();
@@ -88,6 +88,9 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Result<(), 
                             app.current_screen = CurrentScreen::CheckingOut;
                         }
                     }
+                    KeyCode::Esc => {
+                        app.current_screen = CurrentScreen::Home;
+                    }
                     _ => {}
                 },
                 CurrentScreen::CheckingOut => match key.code {
@@ -100,10 +103,13 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Result<(), 
                     }
                     KeyCode::Char('q') => {
                         app.current_screen = CurrentScreen::Exiting;
-                    },
+                    }
                     KeyCode::Char('b') => {
+                        app.current_screen = CurrentScreen::Searching;
+                    }
+                    KeyCode::Esc => {
                         app.current_screen = CurrentScreen::Home;
-                    },
+                    }
                     _ => {}
                 },
                 CurrentScreen::CheckedOutResult => match key.code {
@@ -114,7 +120,7 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Result<(), 
                 },
                 CurrentScreen::Exiting => match key.code {
                     KeyCode::Char('y') => {
-                        return Ok(());
+                        return Ok(true);
                     }
                     KeyCode::Char('n') => {
                         app.current_screen = CurrentScreen::Home;
@@ -146,10 +152,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     )?;
     terminal.show_cursor()?;
 
-    if let Ok(_) = res {
-        app.library.unwrap().save(&app.config.library_path)?;
-    } else
-    if let Err(err) = res {
+    if let Ok(save) = res {
+        if save {
+            app.library.unwrap().save(&app.config.library_path)?;
+        }
+    } else if let Err(err) = res {
         println!("{err:?}");
     }
 
